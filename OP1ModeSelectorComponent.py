@@ -37,6 +37,8 @@ class OP1ModeSelectorComponent(ModeSelectorComponent):
         self._current_mode = -1
         self._mode_index = 0
 
+        self.chr = 0
+
         self._parent = parent
         self._transport = transport
         self._mixer = mixer
@@ -47,6 +49,9 @@ class OP1ModeSelectorComponent(ModeSelectorComponent):
         # creating buttons for the arrows keys
         self._left_arrow_button = ButtonElement(True, MIDI_CC_TYPE, CHANNEL, OP1_LEFT_ARROW)
         self._right_arrow_button = ButtonElement(True, MIDI_CC_TYPE, CHANNEL, OP1_RIGHT_ARROW)
+
+        #self._left_arrow_button.add_value_listener(self.left_arrow_pressed)
+        #self._right_arrow_button.add_value_listener(self.right_arrow_pressed)
         
         # creating button for the shift key
         self._shift_button = ButtonElement(True, MIDI_CC_TYPE, CHANNEL, OP1_SHIFT_BUTTON)
@@ -67,6 +72,15 @@ class OP1ModeSelectorComponent(ModeSelectorComponent):
         # creating a list of note keys buttons
         for i in range(len(self.note_keys_ccs)):
             self.note_keys_buttons.append(ButtonElement(True, MIDI_NOTE_TYPE, CHANNEL, self.note_keys_ccs[i]))
+        
+        # browser toggle only with shift
+        self.lift_button = ButtonElement(False, MIDI_CC_TYPE, CHANNEL, OP1_ARROW_UP_BUTTON)
+        self.ss1_button = ButtonElement(True, MIDI_CC_TYPE, CHANNEL, OP1_SS1_BUTTON)
+        self.ss2_button = ButtonElement(True, MIDI_CC_TYPE, CHANNEL, OP1_SS2_BUTTON)
+#       self.lift_button.add_value_listener(self.browser_toggle_button_callback)
+        self._parent._transport.set_punch_buttons(self.ss1_button, self.ss2_button)
+
+        self.update()
 
     def disconnect(self):
         ModeSelectorComponent.disconnect(self)
@@ -76,28 +90,84 @@ class OP1ModeSelectorComponent(ModeSelectorComponent):
     def number_of_modes(self):
         return NUM_MODES
 
+    def left_arrow_pressed(self, value):
+#            self._parent.song().jump_to_next_cue() # skoci na dalsi marker
+        if (value==127):
+            self._parent.song().scrub_by(-1)
+            self.chr = self.chr -1
+#        self._parent.log("quant: " + str(self._parent.song().clip_trigger_quantization))
+
+    def right_arrow_pressed(self, value):
+        if (value==127):
+            self._parent.song().scrub_by(1)
+
     def shift_pressed(self, value):
         # handling shift pressed (only for transport mode)
         if (self._current_mode==OP1_MODE_TRANSPORT):
             if (value==127):
-                self._transport.set_seek_buttons(None, None)
+                #self._transport.set_seek_buttons(None, None)
                 self._left_arrow_button.add_value_listener(self.shifted_left_arrow_pressed)
                 self._right_arrow_button.add_value_listener(self.shifted_right_arrow_pressed)
+                self._left_arrow_button.remove_value_listener(self.left_arrow_pressed)
+                self._right_arrow_button.remove_value_listener(self.right_arrow_pressed)
             else:
+                self._left_arrow_button.add_value_listener(self.left_arrow_pressed)
+                self._right_arrow_button.add_value_listener(self.right_arrow_pressed)
                 self._left_arrow_button.remove_value_listener(self.shifted_left_arrow_pressed)
                 self._right_arrow_button.remove_value_listener(self.shifted_right_arrow_pressed)
-                self._transport.set_seek_buttons(self._right_arrow_button, self._left_arrow_button)
+                #self._transport.set_seek_buttons(self._right_arrow_button, self._left_arrow_button)
+        # globals - browser toggle with shift only
+        if value == 127:
+            self._parent.shift_pressed = True
+            self.lift_button.remove_value_listener(self.lift_button_callback)
+            self._parent._transport.set_punch_buttons(None, None)
+            self.ss1_button.add_value_listener(self.ss1_loop_start_callback)
+            self.ss2_button.add_value_listener(self.ss2_loop_end_callback)
+            self.lift_button.add_value_listener(self.lift_button_shifted_callback)
+        else:
+            self.lift_button.remove_value_listener(self.lift_button_shifted_callback)
+            self.ss1_button.remove_value_listener(self.ss1_loop_start_callback)
+            self.ss2_button.remove_value_listener(self.ss2_loop_end_callback)
+            self.lift_button.add_value_listener(self.lift_button_callback)
+            self._parent._transport.set_punch_buttons(self.ss1_button, self.ss2_button)
+            self._parent.shift_pressed = False
+
+    def ss1_loop_start_callback(self, value):
+        self._parent.song().loop_start = round(self._parent.song().current_song_time)
+    def ss2_loop_end_callback(self, value):
+        self._parent.song().loop_end = round(self._parent.song().current_song_time)
+
+    def lift_button_callback(self, value):
+        if (value == 127):
+            self._parent.song().set_or_delete_cue()
+
+
+    def lift_button_shifted_callback(self, value):
+        if (value==127):
+            if (self._parent.app.view.is_view_visible("Session")):
+                if (self._parent.app.view.is_view_visible("Browser")):
+                    self._parent.app.view.hide_view("Browser")
+                else:
+                    self._parent.app.view.show_view("Browser")
+
+            if (self._parent.app.view.is_view_visible("Arranger")):
+                if (self._parent.app.view.is_view_visible("Browser")):
+                    self._parent.app.view.hide_view("Browser")
+                else:
+                    self._parent.app.view.show_view("Browser")
 
     def shifted_left_arrow_pressed(self, value):
         # handling negative loop offset behavior
         if (value==127):
-            if (self._parent.song().loop_start>0):
-                self._parent.song().loop_start -= 1
+            self._parent.song().jump_to_prev_cue() # skoci na dalsi marker
+#            if (self._parent.song().loop_start>0):
+#                self._parent.song().loop_start -= 1
 
     def shifted_right_arrow_pressed(self, value):
         # handling positive loop offset behavior
         if (value==127):
-            self._parent.song().loop_start += 1
+#            self._parent.song().loop_start += 1
+            self._parent.song().jump_to_next_cue() # skoci na dalsi marker
 
     def set_loop(self, index, set_loop_start):
         # handling set loop
@@ -139,7 +209,16 @@ class OP1ModeSelectorComponent(ModeSelectorComponent):
 
         if (self._current_mode==OP1_MODE_MIXER):
             # if on mixer mode, use not key to select a track
-            all_tracks = ((self.song().visible_tracks + self.song().return_tracks)) + (self.song().master_track,) #modified
+            all_tracks = []
+            
+            all_tracks.append(list(self.song().tracks))
+            all_tracks.append(list(self.song().return_tracks))
+            
+            m = [self.song().master_track]
+            all_tracks.append(m)
+            
+            all_tracks = [item for sublist in all_tracks for item in sublist]
+
             if (index < len(all_tracks)):
                 self.song().view.selected_track = all_tracks[index]
 
@@ -178,9 +257,12 @@ class OP1ModeSelectorComponent(ModeSelectorComponent):
 
             elif (self._mode_index == OP1_MODE_TRANSPORT):
                 self._parent.log("TRANSPORT MODE")
+
+                self._left_arrow_button.add_value_listener(self.left_arrow_pressed)
+                self._right_arrow_button.add_value_listener(self.right_arrow_pressed)
                 
-                # settings arrows as seek buttons
-                self._transport.set_seek_buttons(self._right_arrow_button, self._left_arrow_button)
+                # settings arrows as seek buttons - doesn't work - can't understand why
+                #self._transport.set_seek_buttons(self._right_arrow_button, self._left_arrow_button)
 
                 # adding value listeners for note keys and note shifted keys
 
@@ -203,7 +285,7 @@ class OP1ModeSelectorComponent(ModeSelectorComponent):
             elif (self._mode_index == OP1_MODE_CLIP):
                 self._parent.log("CLIP MODE")
 
-                # setting arrows as track bank buttons
+                # setting arrows as track bank buttons - not working - can't understand why
                 self._session.set_track_bank_buttons(self._right_arrow_button, self._left_arrow_button)
 
                 # setting last key note as stop all clip button
@@ -227,6 +309,9 @@ class OP1ModeSelectorComponent(ModeSelectorComponent):
 
         elif (self._current_mode == OP1_MODE_TRANSPORT):
             self._parent.log("CLEARING TRANSPORT MODE")
+
+            self._left_arrow_button.remove_value_listener(self.left_arrow_pressed)
+            self._right_arrow_button.remove_value_listener(self.right_arrow_pressed)
 
             # removing value listeners for note keys
             for i in range(NUM_TRACKS):
